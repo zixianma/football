@@ -9,6 +9,7 @@ import logging
 import tree  # pip install dm_tree
 from typing import Dict, List, Optional, Tuple, Type, Union
 from policy_template import build_policy_class
+from models import FullyConnectedNetwork as TorchFC
 import numpy as np
 import ray
 import ray.experimental.tf_utils
@@ -28,7 +29,7 @@ from ray.rllib.models.torch.torch_action_dist import (
     TorchDiagGaussian,
     TorchBeta,
 )
-from ray.rllib.models.torch.fcnet import FullyConnectedNetwork as TorchFC
+# from ray.rllib.models.torch.fcnet import FullyConnectedNetwork as TorchFC
 from ray.rllib.policy.policy import Policy
 # from ray.rllib.policy.policy_template import build_policy_class
 from ray.rllib.policy.sample_batch import SampleBatch

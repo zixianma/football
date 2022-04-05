@@ -177,7 +177,7 @@ class RllibGFootball(MultiAgentEnv):
     actions = []
     for key, value in sorted(action_dict.items()):
       actions.append(value)
-    print("actions:", actions)
+    # print("actions:", actions)
     o, r, d, i = self.env.step(actions)
     rewards = {}
     obs = {}
@@ -190,7 +190,7 @@ class RllibGFootball(MultiAgentEnv):
       else:
         rewards[key] = r
         obs[key] = o
-    print("rewards:", rewards)
+    # print("rewards:", rewards)
     dones = {'__all__': d}
     return obs, rewards, dones, infos
 
