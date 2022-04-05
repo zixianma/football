@@ -23,6 +23,7 @@ import os
 import tempfile
 
 import argparse
+from policy import AlignSACPolicy
 import gfootball.env as football_env
 import gym
 import ray
@@ -34,6 +35,20 @@ from ray.rllib.agents.trainer import Trainer
 from ray.rllib.agents.trainer import with_common_config
 from ray.rllib.utils.deprecation import DEPRECATED_VALUE
 
+import numpy as np
+import torch.nn.functional as F
+
+from ray.rllib.models.modelv2 import ModelV2
+from ray.rllib.models.torch.torch_action_dist import TorchCategorical
+from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray.rllib.models.torch.fcnet import FullyConnectedNetwork as TorchFC
+from ray.rllib.utils.annotations import override
+from ray.rllib.utils.framework import try_import_tf, try_import_torch
+
+tf1, tf, tfv = try_import_tf()
+torch, nn = try_import_torch()
+
+# from ray.rllib.examples.models.custom_loss_model import TorchCustomLossModel
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--num-agents', type=int, default=3)
@@ -41,12 +56,98 @@ parser.add_argument('--num-policies', type=int, default=3)
 parser.add_argument('--num-iters', type=int, default=10)
 parser.add_argument('--simple', action='store_true')
 
+class AlignLossModel(TorchModelV2, nn.Module):
+    """PyTorch version of the CustomLossModel above."""
+
+    def __init__(
+        self, obs_space, action_space, num_outputs, model_config, name):
+        super().__init__(obs_space, action_space, num_outputs, model_config, name)
+        nn.Module.__init__(self)
+
+        # self.input_files = self.model_config["custom_model_config"]["input_files"]
+        # # Create a new input reader per worker.
+        # self.reader = JsonReader(self.input_files)
+        num_outputs = 115
+        self.fcnet = TorchFC(
+            self.obs_space, self.action_space, num_outputs, model_config, name="fcnet"
+        )
+
+    @override(ModelV2)
+    def forward(self, input_dict, state, seq_lens):
+        # Delegate to our FCNet.
+        return self.fcnet(input_dict, state, seq_lens)
+
+    @override(ModelV2)
+    def value_function(self):
+        # Delegate to our FCNet.
+        return self.fcnet.value_function()
+
+    @override(ModelV2)
+    def custom_loss(self, policy_loss, loss_inputs):
+        """Calculates a custom loss on top of the given policy_loss(es).
+        Args:
+            policy_loss (List[TensorType]): The list of already calculated
+                policy losses (as many as there are optimizers).
+            loss_inputs (TensorStruct): Struct of np.ndarrays holding the
+                entire train batch.
+        Returns:
+            List[TensorType]: The altered list of policy losses. In case the
+                custom loss should have its own optimizer, make sure the
+                returned list is one larger than the incoming policy_loss list.
+                In case you simply want to mix in the custom loss into the
+                already calculated policy losses, return a list of altered
+                policy losses (as done in this example below).
+        """
+        obs = loss_inputs["obs"]
+        # Get the next batch from our input files.
+        # batch = self.reader.next()
+
+        # # Define a secondary loss by building a graph copy with weight sharing.
+        # obs = restore_original_dimensions(
+        #     torch.from_numpy(batch["obs"]).float().to(policy_loss[0].device),
+        #     self.obs_space,
+        #     tensorlib="torch",
+        # )
+        new_obs_pred, _ = self.forward({"obs": obs}, [], None)
+
+        # You can also add self-supervised losses easily by referencing tensors
+        # created during _build_layers_v2(). For example, an autoencoder-style
+        # loss can be added as follows:
+        # ae_loss = squared_diff(
+        #     loss_inputs["obs"], Decoder(self.fcnet.last_layer))
+        print("FYI: You can also use these tensors: {}, ".format(loss_inputs))
+        mse_loss = F.mse_loss(
+            new_obs_pred, loss_inputs["new_obs"])
+        # Compute the IL loss.
+        # action_dist = TorchCategorical(logits, self.model_config)
+        # imitation_loss = torch.mean(
+        #     -action_dist.logp(
+        #         torch.from_numpy(loss_inputs['actions']).to(policy_loss[0].device)
+        #     )
+        # )
+        # self.imitation_loss_metric = imitation_loss.item()
+        self.wm_loss = mse_loss
+        self.policy_loss_metric = np.mean([loss.item() for loss in policy_loss])
+
+        # Add the imitation loss to each already calculated policy loss term.
+        # Alternatively (if custom loss has its own optimizer):
+        return policy_loss + [self.wm_loss]
+        # return [loss_ + 10 * imitation_loss for loss_ in policy_loss]
+
+    def metrics(self):
+        return {
+            "policy_loss": self.policy_loss_metric,
+            "wm_loss": self.wm_loss.item(),
+        }
+
 class RllibGFootball(MultiAgentEnv):
   """An example of a wrapper for GFootball to make it compatible with rllib."""
 
   def __init__(self, num_agents):
     self.env = football_env.create_environment(
-        env_name='test_example_multiagent', stacked=False,
+        env_name='11_vs_11_easy_stochastic', stacked=False,
+        representation='simple115v2',
+        rewards='scoring,checkpoints',
         logdir=os.path.join(tempfile.gettempdir(), 'rllib_test'),
         write_goal_dumps=False, write_full_episode_dumps=False, render=True,
         dump_frequency=0,
@@ -57,6 +158,8 @@ class RllibGFootball(MultiAgentEnv):
         low=self.env.observation_space.low[0],
         high=self.env.observation_space.high[0],
         dtype=self.env.observation_space.dtype)
+    # print("self env", self.env.observation_space)
+    # print("overall env", self.observation_space)
     self.num_agents = num_agents
     self._agent_ids = list(range(self.num_agents))
 
@@ -74,6 +177,7 @@ class RllibGFootball(MultiAgentEnv):
     actions = []
     for key, value in sorted(action_dict.items()):
       actions.append(value)
+    print("actions:", actions)
     o, r, d, i = self.env.step(actions)
     rewards = {}
     obs = {}
@@ -86,6 +190,7 @@ class RllibGFootball(MultiAgentEnv):
       else:
         rewards[key] = r
         obs[key] = o
+    print("rewards:", rewards)
     dones = {'__all__': d}
     return obs, rewards, dones, infos
 
@@ -95,13 +200,14 @@ if __name__ == '__main__':
   ray.init(num_gpus=0)
 
   # Simple environment with `num_agents` independent players
+  # print(args.num_agents)
   register_env('gfootball', lambda _: RllibGFootball(args.num_agents))
   single_env = RllibGFootball(args.num_agents)
   obs_space = single_env.observation_space
   act_space = single_env.action_space
 
   def gen_policy(_):
-    return (SACTorchPolicy, obs_space, act_space, {})
+    return (AlignSACPolicy, obs_space, act_space, {})
 
   # Setup PPO with an ensemble of `num_policies` different policies
   policies = {
@@ -109,7 +215,7 @@ if __name__ == '__main__':
   }
   policy_ids = list(policies.keys())
 
-  DefaultConfig = DEFAULT_CONFIG = with_common_config({
+  DefaultConfig = with_common_config({
     # === Model ===
     # Use two Q-networks (instead of one) for action-value estimation.
     # Note: Each Q-network will have its own target network.
@@ -131,7 +237,7 @@ if __name__ == '__main__':
     # specifying the `custom_model` sub-key in below dict (just like you would
     # do in the top-level `model` dict.
     "Q_model": {
-        "fcnet_hiddens": [256, 256],
+        "fcnet_hiddens": [128, 128],
         "fcnet_activation": "relu",
         "post_fcnet_hiddens": [],
         "post_fcnet_activation": None,
@@ -142,12 +248,17 @@ if __name__ == '__main__':
     # The difference to `Q_model` above is that no action concat'ing is
     # performed before the post_fcnet stack.
     "policy_model": {
-        "fcnet_hiddens": [256, 256],
+        "fcnet_hiddens": [128, 128],
         "fcnet_activation": "relu",
         "post_fcnet_hiddens": [],
         "post_fcnet_activation": None,
-        "custom_model": None,  # Use this to define a custom policy model.
-        "custom_model_config": {},
+        # "custom_model": AlignLossModel,  # Use this to define a custom policy model.
+        # "custom_model_config": {
+        #   "fcnet_hiddens": [128, 128],
+        #   "fcnet_activation": "relu",
+        #   "post_fcnet_hiddens": [],
+        #   "post_fcnet_activation": None,
+        # },
     },
     # Actions are already normalized, no need to clip them further.
     "clip_actions": False,
@@ -254,6 +365,7 @@ if __name__ == '__main__':
           'env': 'gfootball',
           'simple_optimizer': args.simple,
           'framework': 'torch',
+          'log_level': 'ERROR', 
           'multiagent': {
               'policies': policies,
               'policy_mapping_fn': tune.function(

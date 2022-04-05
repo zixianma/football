@@ -34,7 +34,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--num-agents', type=int, default=3)
 parser.add_argument('--num-policies', type=int, default=3)
-parser.add_argument('--num-iters', type=int, default=100000)
+parser.add_argument('--num-iters', type=int, default=10)
 parser.add_argument('--simple', action='store_true')
 
 
@@ -45,7 +45,7 @@ class RllibGFootball(MultiAgentEnv):
     self.env = football_env.create_environment(
         env_name='test_example_multiagent', stacked=False,
         logdir=os.path.join(tempfile.gettempdir(), 'rllib_test'),
-        write_goal_dumps=False, write_full_episode_dumps=False, render=True,
+        write_goal_dumps=False, write_full_episode_dumps=False, render=False,
         dump_frequency=0,
         number_of_left_players_agent_controls=num_agents,
         channel_dimensions=(42, 42))
@@ -83,12 +83,13 @@ class RllibGFootball(MultiAgentEnv):
         rewards[key] = r
         obs[key] = o
     dones = {'__all__': d}
+    print('rewards:', rewards)
     return obs, rewards, dones, infos
 
 
 if __name__ == '__main__':
   args = parser.parse_args()
-  ray.init(num_gpus=1)
+  ray.init(num_gpus=0)
 
   # Simple environment with `num_agents` independent players
   register_env('gfootball', lambda _: RllibGFootball(args.num_agents))
@@ -125,7 +126,7 @@ if __name__ == '__main__':
           'batch_mode': 'truncate_episodes',
           'observation_filter': 'NoFilter',
           'vf_share_layers': 'true',
-          'num_gpus': 1,
+          'num_gpus': 0,
           'lr': 2.5e-4,
           'log_level': 'DEBUG',
           'simple_optimizer': args.simple,

@@ -23,7 +23,6 @@ from baselines.common.models import register
 import sonnet as snt
 import tensorflow.compat.v1 as tf
 
-
 @register('gfootball_impala_cnn')
 def gfootball_impala_cnn():
   def network_fn(frame):
