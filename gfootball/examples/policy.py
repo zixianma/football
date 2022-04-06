@@ -223,8 +223,8 @@ def postprocess_trajectory_torch(policy, batch, other_agent_batches, episode):
     # print("players position:", batch[SampleBatch.OBS][:, :22])
     # print("players direction:", batch[SampleBatch.OBS][:, 22:45])
     batch = postprocess_trajectory(policy, batch, other_agent_batches, episode)
-    # if other_agent_batches:
-    #     batch = add_intrinsic_reward(policy, batch,other_agent_batches)
+    if other_agent_batches:
+        batch = add_intrinsic_reward(policy, batch,other_agent_batches)
     return batch
 
 def imagine_agent_j_obs(batch, other_agent_batches):

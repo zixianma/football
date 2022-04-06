@@ -54,6 +54,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--num-agents', type=int, default=3)
 parser.add_argument('--num-policies', type=int, default=3)
 parser.add_argument('--num-iters', type=int, default=10)
+parser.add_argument('--num-gpus', type=int, default=0)
 parser.add_argument('--simple', action='store_true')
 
 class AlignLossModel(TorchModelV2, nn.Module):
@@ -149,7 +150,7 @@ class RllibGFootball(MultiAgentEnv):
         representation='simple115v2',
         rewards='scoring,checkpoints',
         logdir=os.path.join(tempfile.gettempdir(), 'rllib_test'),
-        write_goal_dumps=False, write_full_episode_dumps=False, render=True,
+        write_goal_dumps=False, write_full_episode_dumps=False, render=False if torch.cuda.is_available() else True,
         dump_frequency=0,
         number_of_left_players_agent_controls=num_agents,
         channel_dimensions=(42, 42))
@@ -197,7 +198,7 @@ class RllibGFootball(MultiAgentEnv):
 
 if __name__ == '__main__':
   args = parser.parse_args()
-  ray.init(num_gpus=0)
+  ray.init(num_gpus=args.num_gpus)
 
   # Simple environment with `num_agents` independent players
   # print(args.num_agents)
@@ -339,13 +340,13 @@ if __name__ == '__main__':
 
     # === Parallelism ===
     # Whether to use a GPU for local optimization.
-    "num_gpus": 0,
+    "num_gpus": args.num_gpus,
     # Number of workers for collecting samples with. This only makes sense
     # to increase if your environment is particularly slow to sample, or if
     # you"re using the Async or Ape-X optimizers.
     "num_workers": 0,
     # Whether to allocate GPUs for workers (if > 0).
-    "num_gpus_per_worker": 0,
+    "num_gpus_per_worker": args.num_gpus,
     # Whether to allocate CPUs for workers (if > 0).
     "num_cpus_per_worker": 1,
     # Whether to compute priorities on workers.
