@@ -56,90 +56,7 @@ parser.add_argument('--num-policies', type=int, default=3)
 parser.add_argument('--num-iters', type=int, default=10)
 parser.add_argument('--num-gpus', type=int, default=0)
 parser.add_argument('--simple', action='store_true')
-
-class AlignLossModel(TorchModelV2, nn.Module):
-    """PyTorch version of the CustomLossModel above."""
-
-    def __init__(
-        self, obs_space, action_space, num_outputs, model_config, name):
-        super().__init__(obs_space, action_space, num_outputs, model_config, name)
-        nn.Module.__init__(self)
-
-        # self.input_files = self.model_config["custom_model_config"]["input_files"]
-        # # Create a new input reader per worker.
-        # self.reader = JsonReader(self.input_files)
-        num_outputs = 115
-        self.fcnet = TorchFC(
-            self.obs_space, self.action_space, num_outputs, model_config, name="fcnet"
-        )
-
-    @override(ModelV2)
-    def forward(self, input_dict, state, seq_lens):
-        # Delegate to our FCNet.
-        return self.fcnet(input_dict, state, seq_lens)
-
-    @override(ModelV2)
-    def value_function(self):
-        # Delegate to our FCNet.
-        return self.fcnet.value_function()
-
-    @override(ModelV2)
-    def custom_loss(self, policy_loss, loss_inputs):
-        """Calculates a custom loss on top of the given policy_loss(es).
-        Args:
-            policy_loss (List[TensorType]): The list of already calculated
-                policy losses (as many as there are optimizers).
-            loss_inputs (TensorStruct): Struct of np.ndarrays holding the
-                entire train batch.
-        Returns:
-            List[TensorType]: The altered list of policy losses. In case the
-                custom loss should have its own optimizer, make sure the
-                returned list is one larger than the incoming policy_loss list.
-                In case you simply want to mix in the custom loss into the
-                already calculated policy losses, return a list of altered
-                policy losses (as done in this example below).
-        """
-        obs = loss_inputs["obs"]
-        # Get the next batch from our input files.
-        # batch = self.reader.next()
-
-        # # Define a secondary loss by building a graph copy with weight sharing.
-        # obs = restore_original_dimensions(
-        #     torch.from_numpy(batch["obs"]).float().to(policy_loss[0].device),
-        #     self.obs_space,
-        #     tensorlib="torch",
-        # )
-        new_obs_pred, _ = self.forward({"obs": obs}, [], None)
-
-        # You can also add self-supervised losses easily by referencing tensors
-        # created during _build_layers_v2(). For example, an autoencoder-style
-        # loss can be added as follows:
-        # ae_loss = squared_diff(
-        #     loss_inputs["obs"], Decoder(self.fcnet.last_layer))
-        print("FYI: You can also use these tensors: {}, ".format(loss_inputs))
-        mse_loss = F.mse_loss(
-            new_obs_pred, loss_inputs["new_obs"])
-        # Compute the IL loss.
-        # action_dist = TorchCategorical(logits, self.model_config)
-        # imitation_loss = torch.mean(
-        #     -action_dist.logp(
-        #         torch.from_numpy(loss_inputs['actions']).to(policy_loss[0].device)
-        #     )
-        # )
-        # self.imitation_loss_metric = imitation_loss.item()
-        self.wm_loss = mse_loss
-        self.policy_loss_metric = np.mean([loss.item() for loss in policy_loss])
-
-        # Add the imitation loss to each already calculated policy loss term.
-        # Alternatively (if custom loss has its own optimizer):
-        return policy_loss + [self.wm_loss]
-        # return [loss_ + 10 * imitation_loss for loss_ in policy_loss]
-
-    def metrics(self):
-        return {
-            "policy_loss": self.policy_loss_metric,
-            "wm_loss": self.wm_loss.item(),
-        }
+parser.add_argument('--align', action='store_true')
 
 class RllibGFootball(MultiAgentEnv):
   """An example of a wrapper for GFootball to make it compatible with rllib."""
@@ -208,7 +125,7 @@ if __name__ == '__main__':
   act_space = single_env.action_space
 
   def gen_policy(_):
-    return (AlignSACPolicy, obs_space, act_space, {})
+    return (AlignSACPolicy if args.align else None, obs_space, act_space, {})
 
   # Setup PPO with an ensemble of `num_policies` different policies
   policies = {
