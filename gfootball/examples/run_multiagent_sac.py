@@ -53,7 +53,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--num-agents', type=int, default=3)
 parser.add_argument('--num-policies', type=int, default=3)
-parser.add_argument('--num-iters', type=int, default=10)
+parser.add_argument('--num-iters', type=int, default=10000)
 parser.add_argument('--num-gpus', type=int, default=0)
 parser.add_argument('--simple', action='store_true')
 parser.add_argument('--align', action='store_true')
