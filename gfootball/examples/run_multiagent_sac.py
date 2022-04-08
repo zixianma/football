@@ -55,6 +55,8 @@ parser.add_argument('--num-agents', type=int, default=3)
 parser.add_argument('--num-policies', type=int, default=3)
 parser.add_argument('--num-iters', type=int, default=10000)
 parser.add_argument('--num-gpus', type=int, default=0)
+parser.add_argument('--logdir', type=str, default='../result')
+parser.add_argument('--name', type=str, default='exp')
 parser.add_argument('--simple', action='store_true')
 parser.add_argument('--align', action='store_true')
 
@@ -125,7 +127,7 @@ if __name__ == '__main__':
   act_space = single_env.action_space
 
   def gen_policy(_):
-    return (AlignSACPolicy if args.align else None, obs_space, act_space, {})
+    return (AlignSACPolicy if args.align else SACTorchPolicy, obs_space, act_space, {})
 
   # Setup PPO with an ensemble of `num_policies` different policies
   policies = {
@@ -300,4 +302,6 @@ if __name__ == '__main__':
       stop={'training_iteration': args.num_iters},
       checkpoint_freq=50,
       config=config,
+      local_dir=args.logdir,
+      name=args.name
   )
