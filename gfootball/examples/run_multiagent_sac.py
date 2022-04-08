@@ -59,6 +59,7 @@ parser.add_argument('--logdir', type=str, default='../result')
 parser.add_argument('--name', type=str, default='exp')
 parser.add_argument('--simple', action='store_true')
 parser.add_argument('--align', action='store_true')
+parser.add_argument('--seeds', type=int, nargs='+', help='a list of random seeds', required=True)
 
 class RllibGFootball(MultiAgentEnv):
   """An example of a wrapper for GFootball to make it compatible with rllib."""
@@ -286,6 +287,7 @@ if __name__ == '__main__':
           'simple_optimizer': args.simple,
           'framework': 'torch',
           'log_level': 'ERROR', 
+          'seed': tune.grid_search(args.seeds),
           'multiagent': {
               'policies': policies,
               'policy_mapping_fn': tune.function(
