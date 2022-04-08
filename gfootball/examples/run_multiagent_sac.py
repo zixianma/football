@@ -63,11 +63,11 @@ class RllibGFootball(MultiAgentEnv):
 
   def __init__(self, num_agents):
     self.env = football_env.create_environment(
-        env_name='11_vs_11_easy_stochastic', stacked=False,
+        env_name='academy_3_vs_1_with_keeper', stacked=False,
         representation='simple115v2',
         rewards='scoring,checkpoints',
         logdir=os.path.join(tempfile.gettempdir(), 'rllib_test'),
-        write_goal_dumps=False, write_full_episode_dumps=False, render=False if torch.cuda.is_available() else True,
+        write_goal_dumps=False, write_full_episode_dumps=False, render=False,
         dump_frequency=0,
         number_of_left_players_agent_controls=num_agents,
         channel_dimensions=(42, 42))

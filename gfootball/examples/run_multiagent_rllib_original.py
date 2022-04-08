@@ -106,7 +106,7 @@ if __name__ == '__main__':
   policy_ids = list(policies.keys())
 
   tune.run(
-      'PPO',
+      'IMPALA',
       stop={'training_iteration': args.num_iters},
       checkpoint_freq=50,
       config={
