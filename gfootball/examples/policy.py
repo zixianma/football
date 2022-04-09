@@ -211,7 +211,7 @@ def build_world_model(
             target model will be created in this function and assigned to
             `policy.target_model`.
     """
-    num_outputs = config['world_model_output_dim'] if 'world_model_output_dim' in config else 115
+    num_outputs = config['world_model_output_dim'] if 'world_model_output_dim' in config else int(np.product(obs_space.shape))
     model = TorchFC(
         obs_space, action_space, num_outputs, config, name="fcnet", 
         input_dim=int(np.product(obs_space.shape))+1
@@ -227,7 +227,7 @@ def postprocess_trajectory_torch(policy, batch, other_agent_batches, episode):
         batch = add_intrinsic_reward(policy, batch,other_agent_batches)
     return batch
 
-def imagine_agent_j_obs(batch, other_agent_batches):
+def imagine_agent_j_obs(batch, other_agent_batches, j_list):
     # Obs holds:
     #      - [0-22) 11 (x,y) positions for each player of the left team.
     #      - [22-44) 11 (x,y) motion vectors for each player of the left team.
@@ -244,36 +244,39 @@ def imagine_agent_j_obs(batch, other_agent_batches):
     #         CornerMode, ThrowInMode, PenaltyMode}.
     #      Can only be used when the scenario is a flavor of normal game
     #      (i.e. 11 versus 11 players).
-    radius = float('inf')
+    radius = 0.5
     batch_size = batch[SampleBatch.OBS].shape[0]
-    num_player = 11
-    num_agent = len(other_agent_batches) + 1
-    player_pos_idx = np.array(range(22))
-    player_dir_idx = np.array(range(22, 44))
-    adv_pos_idx = np.array(range(44, 66))
-    adv_dir_idx = np.array(range(66, 88))
-    ball_pos_idx = np.array(range(88, 91))
-    ball_dir_idx = np.array(range(91, 94))
-    ball_ctrl_idx = np.array(range(94, 97))
-    active_player_onehot_idx = np.array(range(97, 108))
-    game_mode_onehot_idx = np.array(range(108, 115))
+    obs_dim = batch[SampleBatch.OBS].shape[1]
+    num_player = (obs_dim - 16) // 5
+    num_agent = len(other_agent_batches) + 1 + 1 # + 1 goal keeper
+    num_adv = num_player - num_agent
 
+    player_pos_idx = np.array(range(num_agent*2))
+    player_dir_idx = np.array(range(num_agent*2, num_agent*4))
+    adv_pos_idx = np.array(range(num_agent*4, num_agent*4+num_adv*2))
+    adv_dir_idx = np.array(range(num_agent*4+num_adv*2, num_agent*4+num_adv*4))
+    ball_pos_idx = np.array(range(num_player*4, num_player*4+3))
+    ball_dir_idx = np.array(range(num_player*4+3, num_player*4+6))
+    ball_ctrl_idx = np.array(range(num_player*4+6, num_player*4+9))
+    active_player_onehot_idx = np.array(range(num_player*4+9, num_player*4+9+num_player))
+    game_mode_onehot_idx = np.array(range(num_player*5+9, num_player*5+9+7))
+    assert num_player*5+9+7 == batch[SampleBatch.OBS].shape[1]
     obs_i = batch[SampleBatch.OBS]
+    # print('obs i:', obs_i)
     player_id = np.argmax(obs_i[:, active_player_onehot_idx])
-
     raw_all_player_pos = obs_i[:, player_pos_idx] #(bs,11*2)
-    all_player_pos = np.reshape(raw_all_player_pos, (batch_size,num_player,2)) #(bs,11,2)
+    all_player_pos = np.reshape(raw_all_player_pos, (batch_size,num_agent,2)) #(bs,11,2)
     raw_all_player_dir = obs_i[:, player_dir_idx]
-
     raw_all_adv_pos = obs_i[:, adv_pos_idx]
-    all_adv_pos = np.reshape(raw_all_adv_pos, (batch_size,num_player,2))
+    all_adv_pos = np.reshape(raw_all_adv_pos, (batch_size,num_adv,2))
     raw_all_adv_dir = obs_i[:, adv_dir_idx]
 
     i_pos = all_player_pos[:, player_id, :]
     ball_pos = np.reshape(obs_i[:, ball_pos_idx], (batch_size,1,3))
     
     obs_j_list = []
-    for j_id in range(num_agent):
+    for j_id in j_list:
+        # print('i & j:', player_id, j_id)
         if j_id == player_id:
             obs_j_list.append(obs_i)
         else:
@@ -282,35 +285,38 @@ def imagine_agent_j_obs(batch, other_agent_batches):
             j_pos = all_player_pos[:, j_id, :]
             
             j_i_diff = j_pos - i_pos 
+            # print(all_player_pos)
+            # print(j_pos) 
+            # print('diff:', np.sqrt(np.sum(np.square(j_i_diff))))
             j_mask = np.sqrt(np.sum(np.square(j_i_diff), axis=-1)) <= radius
-
-            if j_mask == 0: # j is out of i's receptive field
-                obs_j_list.append(np.zeros(obs_i.shape))
-            else:
-                j_others_diff =  np.tile(j_pos, (1, num_player, 1)) - all_player_pos
+            # print(j_mask)
+            if j_mask == 1: # j is out of i's receptive field
+                j_others_diff =  np.tile(j_pos, (1, num_agent, 1)) - all_player_pos
                 player_mask = np.sqrt(np.sum(np.square(j_others_diff), axis=-1)) <= radius
-                vis_player_idx = np.nonzero(np.repeat(player_mask, 2))
-
-                j_adv_diff =  np.tile(j_pos, (1, num_player, 1)) - all_adv_pos
+                vis_player_idx = np.nonzero(np.repeat(player_mask, 2))[0]
+                # print('teammates:', player_mask, vis_player_idx)
+                j_adv_diff =  np.tile(j_pos, (1, num_adv, 1)) - all_adv_pos
                 adv_mask = np.sqrt(np.sum(np.square(j_adv_diff), axis=-1)) <= radius
-                vis_adv_idx = np.nonzero(np.repeat(adv_mask, 2))
-
+                vis_adv_idx = np.nonzero(np.repeat(adv_mask, 2))[0]
+                # print('adversaries:', adv_mask, vis_adv_idx)
                 j_ball_diff = j_pos - ball_pos[:,:,:-1]
                 ball_mask = np.sqrt(np.sum(np.square(j_ball_diff), axis=-1)) <= radius
-                
-                obs_j[:, player_pos_idx][:, vis_player_idx] = raw_all_player_pos[:,vis_player_idx]
-                obs_j[:, player_dir_idx][:, vis_player_idx]= raw_all_player_dir[:,vis_player_idx]
+                # print('ball:', ball_mask)
+                obs_j[:, vis_player_idx] = raw_all_player_pos[:,vis_player_idx]
+                obs_j[:, num_agent*2+vis_player_idx] = raw_all_player_dir[:,vis_player_idx]
 
-                obs_j[:, adv_pos_idx][:, vis_adv_idx] = raw_all_adv_pos[:,vis_adv_idx]
-                obs_j[:, adv_dir_idx][:, vis_adv_idx]= raw_all_adv_dir[:,vis_adv_idx]
+                obs_j[:, num_agent*4+vis_adv_idx] = raw_all_adv_pos[:,vis_adv_idx]
+                obs_j[:, num_agent*4+num_adv*2+vis_adv_idx] = raw_all_adv_dir[:,vis_adv_idx]
 
-                obs_j[:, ball_pos_idx] = np.repeat(ball_mask, 3)
-                obs_j[:, ball_dir_idx] = np.repeat(ball_mask, 3)
-                obs_j[:, ball_ctrl_idx] = np.repeat(ball_mask, 3)
+                if ball_mask:
+                    obs_j[:, ball_pos_idx] = obs_i[:, ball_pos_idx] 
+                    obs_j[:, ball_dir_idx] = obs_i[:, ball_dir_idx]
+                    obs_j[:, ball_ctrl_idx] = obs_i[:, ball_ctrl_idx]
 
                 obs_j[:, active_player_onehot_idx] = obs_i[:, active_player_onehot_idx]
                 obs_j[:, game_mode_onehot_idx] = obs_i[:, game_mode_onehot_idx]
-                obs_j_list.append(obs_j)
+            # print('obs j:', obs_j)
+            obs_j_list.append(obs_j)
 
     return obs_j_list
 
@@ -330,10 +336,10 @@ def add_intrinsic_reward(policy, batch: SampleBatch, other_agent_batches):
     # intr_rew += 1 / obs_size * -pred_loss.detach().cpu().numpy()
 
     # get prediction losses from other agents
-    obs_j_list = imagine_agent_j_obs(batch, other_agent_batches)
-        
-    obs_n = np.concatenate(obs_j_list, axis=0) #(bs*j, obs_dim), where j = len(j_list)
+    num_agent = len(other_agent_batches) + 1 + 1 #goal keeper #0 is uncontrollable
+    obs_j_list = imagine_agent_j_obs(batch, other_agent_batches, list(range(1, num_agent)))
     
+    obs_n = np.concatenate(obs_j_list, axis=0) #(bs*j, obs_dim), where j = len(j_list)
     act_n = np.concatenate([batch[SampleBatch.ACTIONS]] * (len(other_agent_batches) + 1), axis=0) #(bs*j, )
     inputs = np.concatenate((obs_n, np.expand_dims(act_n, axis=-1)), axis=1) #(bs*j, obs_dim+1)
     inputs = to_torch(inputs, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
@@ -350,13 +356,19 @@ def add_intrinsic_reward(policy, batch: SampleBatch, other_agent_batches):
     
     pred_losses = torch.norm(true_next_obs_n - pred_next_obs_n, p=2, dim=1) #(bs*j, )
     #zero out the losses for invisible agents
-    obs_mask = to_torch(~np.all(obs_n == 0, axis=1), device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
-    pred_losses *= obs_mask
+    obs_mask = ~np.all(obs_n == -1, axis=1)
+    # print('obs mask:', obs_mask)
+    pred_losses *= to_torch(obs_mask, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
 
     pred_losses = pred_losses.view(batch_size, -1) #(bs, j)
-    intr_rew += 1 / len(~np.all(obs_n == 0, axis=1)) * -pred_losses.sum(dim=1).detach().cpu().numpy()
-    
+    # print('visible agents:', np.sum(obs_mask))
+    # print('pred losses:', pred_losses)
+    visible_agents = np.sum(obs_mask)
+    multiplier = 1 / visible_agents if visible_agents != 0 else 0
+    intr_rew += multiplier * -pred_losses.sum(dim=1).detach().cpu().numpy()
+    # print('intr rew before norm:', intr_rew)
     intr_rew = 1 / obs_size * intr_rew
+    # print('intr rew after norm:', intr_rew)
     # print("original reward:", batch[SampleBatch.REWARDS])
     # print("intrinsic reward:", intr_rew)
     batch[SampleBatch.REWARDS] += intr_rew
