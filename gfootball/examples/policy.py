@@ -227,7 +227,7 @@ def postprocess_trajectory_torch(policy, batch, other_agent_batches, episode):
         batch = add_intrinsic_reward(policy, batch,other_agent_batches)
     return batch
 
-def imagine_agent_j_obs(batch, other_agent_batches, j_list):
+def imagine_agent_j_obs(batch, j_list, radius):
     # Obs holds:
     #      - [0-22) 11 (x,y) positions for each player of the left team.
     #      - [22-44) 11 (x,y) motion vectors for each player of the left team.
@@ -244,11 +244,10 @@ def imagine_agent_j_obs(batch, other_agent_batches, j_list):
     #         CornerMode, ThrowInMode, PenaltyMode}.
     #      Can only be used when the scenario is a flavor of normal game
     #      (i.e. 11 versus 11 players).
-    radius = 0.5
     batch_size = batch[SampleBatch.OBS].shape[0]
     obs_dim = batch[SampleBatch.OBS].shape[1]
     num_player = (obs_dim - 16) // 5
-    num_agent = len(other_agent_batches) + 1 + 1 # + 1 goal keeper
+    num_agent = len(j_list) + 1
     num_adv = num_player - num_agent
 
     player_pos_idx = np.array(range(num_agent*2))
@@ -327,7 +326,7 @@ def add_intrinsic_reward(policy, batch: SampleBatch, other_agent_batches):
     intr_rew = np.zeros(batch[SampleBatch.REWARDS].shape)
     world_model = policy.world_model
     inputs = obs_i
-    true_next_obs_i = to_torch(batch[SampleBatch.NEXT_OBS])
+    # true_next_obs_i = to_torch(batch[SampleBatch.NEXT_OBS])
 
     # get self prediction loss  
     # pred_next_obs_i, _ = world_model(to_torch(batch))
@@ -337,7 +336,7 @@ def add_intrinsic_reward(policy, batch: SampleBatch, other_agent_batches):
 
     # get prediction losses from other agents
     num_agent = len(other_agent_batches) + 1 + 1 #goal keeper #0 is uncontrollable
-    obs_j_list = imagine_agent_j_obs(batch, other_agent_batches, list(range(1, num_agent)))
+    obs_j_list = imagine_agent_j_obs(batch, list(range(1, num_agent)), policy.env_radius)
     
     obs_n = np.concatenate(obs_j_list, axis=0) #(bs*j, obs_dim), where j = len(j_list)
     act_n = np.concatenate([batch[SampleBatch.ACTIONS]] * (len(other_agent_batches) + 1), axis=0) #(bs*j, )

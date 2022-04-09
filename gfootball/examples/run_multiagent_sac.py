@@ -59,6 +59,7 @@ parser.add_argument('--logdir', type=str, default='../result')
 parser.add_argument('--name', type=str, default='exp')
 parser.add_argument('--simple', action='store_true')
 parser.add_argument('--align', action='store_true')
+parser.add_argument('--radius', type=float, default=float('inf'))
 parser.add_argument('--seeds', type=int, nargs='+', help='a list of random seeds', required=True)
 
 class RllibGFootball(MultiAgentEnv):
@@ -69,6 +70,7 @@ class RllibGFootball(MultiAgentEnv):
         env_name='academy_3_vs_1_with_keeper', stacked=False,
         representation='simple115v2',
         rewards='scoring,checkpoints',
+        env_radius=args.radius,
         logdir=os.path.join(tempfile.gettempdir(), 'rllib_test'),
         write_goal_dumps=False, write_full_episode_dumps=False, render=False,
         dump_frequency=0,
@@ -79,7 +81,6 @@ class RllibGFootball(MultiAgentEnv):
         low=self.env.observation_space.low[0],
         high=self.env.observation_space.high[0],
         dtype=self.env.observation_space.dtype)
-    # print("self env", self.env.observation_space)
     # print("overall env", self.observation_space)
     self.num_agents = num_agents
     self._agent_ids = list(range(self.num_agents))
@@ -128,7 +129,7 @@ if __name__ == '__main__':
   act_space = single_env.action_space
 
   def gen_policy(_):
-    return (AlignSACPolicy if args.align else SACTorchPolicy, obs_space, act_space, {})
+    return (AlignSACPolicy if args.align else SACTorchPolicy, obs_space, act_space, {'env_radius': args.radius})
 
   # Setup PPO with an ensemble of `num_policies` different policies
   policies = {
