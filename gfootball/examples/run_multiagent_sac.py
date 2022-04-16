@@ -69,7 +69,7 @@ class RllibGFootball(MultiAgentEnv):
     self.env = football_env.create_environment(
         env_name='academy_3_vs_1_with_keeper', stacked=False,
         representation='simple115v2',
-        rewards='scoring,checkpoints',
+        rewards='scoring',
         env_radius=args.radius,
         logdir=os.path.join(tempfile.gettempdir(), 'rllib_test'),
         write_goal_dumps=False, write_full_episode_dumps=False, render=False,
@@ -303,8 +303,10 @@ if __name__ == '__main__':
   tune.run(
       'SAC',
       stop={'training_iteration': args.num_iters},
-      checkpoint_freq=50,
+      checkpoint_freq=500,
       config=config,
       local_dir=args.logdir,
-      name=args.name
+      name=args.name,
+      checkpoint_at_end=True,
+      #restore="/home/visualgenome/zixianma/football/gfootball/result/align/SAC_gfootball_2e8a9_00000_0_seed=1_2022-04-09_15-05-35/checkpoint_007150"
   )
