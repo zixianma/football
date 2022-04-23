@@ -55,6 +55,7 @@ parser.add_argument('--num-agents', type=int, default=3)
 parser.add_argument('--num-policies', type=int, default=3)
 parser.add_argument('--num-iters', type=int, default=10000)
 parser.add_argument('--num-gpus', type=int, default=0)
+parser.add_argument('--object-store-memory-GB', type=int, default=10)
 parser.add_argument('--logdir', type=str, default='../result')
 parser.add_argument('--name', type=str, default='exp')
 parser.add_argument('--simple', action='store_true')
@@ -119,7 +120,7 @@ class RllibGFootball(MultiAgentEnv):
 
 if __name__ == '__main__':
   args = parser.parse_args()
-  ray.init(num_gpus=args.num_gpus)
+  ray.init(num_gpus=args.num_gpus, object_store_memory=args.object_store_memory_GB * (1024 ** 3))
 
   # Simple environment with `num_agents` independent players
   # print(args.num_agents)
