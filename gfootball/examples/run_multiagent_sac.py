@@ -84,7 +84,9 @@ class RllibGFootball(MultiAgentEnv):
         dtype=self.env.observation_space.dtype)
     # print("overall env", self.observation_space)
     self.num_agents = num_agents
-    self._agent_ids = list(range(self.num_agents))
+    # self._agent_ids = list(range(self.num_agents))
+    self._agent_ids = [f'agent_{id}' for id in range(self.num_agents)]
+    # print('agent ids:', self._agent_ids)
 
   def reset(self):
     original_obs = self.env.reset()
@@ -97,10 +99,10 @@ class RllibGFootball(MultiAgentEnv):
     return obs
 
   def step(self, action_dict):
+    # print("actions:", action_dict)
     actions = []
     for key, value in sorted(action_dict.items()):
       actions.append(value)
-    # print("actions:", actions)
     o, r, d, i = self.env.step(actions)
     rewards = {}
     obs = {}
