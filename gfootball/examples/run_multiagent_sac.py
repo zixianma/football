@@ -55,7 +55,9 @@ parser.add_argument('--num-agents', type=int, default=3)
 parser.add_argument('--num-policies', type=int, default=3)
 parser.add_argument('--num-iters', type=int, default=10000)
 parser.add_argument('--num-gpus', type=int, default=0)
-parser.add_argument('--logdir', type=str, default='../result')
+parser.add_argument('--object-store-memory-GB', type=int, default=10)
+parser.add_argument('--memory-GB',type=int, default=10)
+parser.add_argument('--logdir', type=str, default='/vision2/u/zixianma/football_results')
 parser.add_argument('--name', type=str, default='exp')
 parser.add_argument('--simple', action='store_true')
 parser.add_argument('--align-mode', type=str, default='101')
@@ -69,7 +71,7 @@ class RllibGFootball(MultiAgentEnv):
     self.env = football_env.create_environment(
         env_name='academy_3_vs_1_with_keeper', stacked=False,
         representation='simple115v2',
-        rewards='scoring,checkpoints',
+        rewards='scoring',
         env_radius=args.radius,
         logdir=os.path.join(tempfile.gettempdir(), 'rllib_test'),
         write_goal_dumps=False, write_full_episode_dumps=False, render=False,
@@ -83,7 +85,9 @@ class RllibGFootball(MultiAgentEnv):
         dtype=self.env.observation_space.dtype)
     # print("overall env", self.observation_space)
     self.num_agents = num_agents
-    self._agent_ids = list(range(self.num_agents))
+    # self._agent_ids = list(range(self.num_agents))
+    self._agent_ids = [f'agent_{id}' for id in range(self.num_agents)]
+    # print('agent ids:', self._agent_ids)
 
   def reset(self):
     original_obs = self.env.reset()
@@ -96,10 +100,10 @@ class RllibGFootball(MultiAgentEnv):
     return obs
 
   def step(self, action_dict):
+    # print("actions:", action_dict)
     actions = []
     for key, value in sorted(action_dict.items()):
       actions.append(value)
-    # print("actions:", actions)
     o, r, d, i = self.env.step(actions)
     rewards = {}
     obs = {}
@@ -119,7 +123,7 @@ class RllibGFootball(MultiAgentEnv):
 
 if __name__ == '__main__':
   args = parser.parse_args()
-  ray.init(num_gpus=args.num_gpus)
+  ray.init(num_gpus=args.num_gpus, _memory=args.memory_GB * (1024 ** 3), object_store_memory=args.object_store_memory_GB * (1024 ** 3))
 
   # Simple environment with `num_agents` independent players
   # print(args.num_agents)
@@ -303,8 +307,10 @@ if __name__ == '__main__':
   tune.run(
       'SAC',
       stop={'training_iteration': args.num_iters},
-      checkpoint_freq=50,
+      checkpoint_freq=500,
       config=config,
       local_dir=args.logdir,
-      name=args.name
+      name=args.name,
+      checkpoint_at_end=True,
+      #restore="/home/visualgenome/zixianma/football/gfootball/result/align/SAC_gfootball_2e8a9_00000_0_seed=1_2022-04-09_15-05-35/checkpoint_007150"
   )
