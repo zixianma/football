@@ -259,6 +259,7 @@ def build_policy_class(
             # Set the DL framework for this Policy.
             self.framework = self.config["framework"] = framework
             self.env_radius = self.config["env_radius"]
+            self.align_mode = self.config["align_mode"]
             # Validate observation- and action-spaces.
             if validate_spaces:
                 validate_spaces(self, obs_space, action_space, self.config)

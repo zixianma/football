@@ -58,7 +58,7 @@ parser.add_argument('--num-gpus', type=int, default=0)
 parser.add_argument('--logdir', type=str, default='../result')
 parser.add_argument('--name', type=str, default='exp')
 parser.add_argument('--simple', action='store_true')
-parser.add_argument('--align', action='store_true')
+parser.add_argument('--align-mode', type=str, default='101')
 parser.add_argument('--radius', type=float, default=float('inf'))
 parser.add_argument('--seeds', type=int, nargs='+', help='a list of random seeds', required=True)
 
@@ -129,7 +129,7 @@ if __name__ == '__main__':
   act_space = single_env.action_space
 
   def gen_policy(_):
-    return (AlignSACPolicy if args.align else SACTorchPolicy, obs_space, act_space, {'env_radius': args.radius})
+    return (AlignSACPolicy if hasattr(args, 'align_mode') else SACTorchPolicy, obs_space, act_space, {'env_radius': args.radius, 'align_mode': args.align_mode})
 
   # Setup PPO with an ensemble of `num_policies` different policies
   policies = {

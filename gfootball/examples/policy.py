@@ -3,6 +3,7 @@ PyTorch policy class used for SAC.
 """
 
 # from turtle import back
+from xml.dom import NotSupportedErr
 import gym
 from gym.spaces import Box, Discrete
 import logging
@@ -247,7 +248,7 @@ def imagine_agent_j_obs(batch, j_list, radius):
     batch_size = batch[SampleBatch.OBS].shape[0]
     obs_dim = batch[SampleBatch.OBS].shape[1]
     num_player = (obs_dim - 16) // 5
-    num_agent = len(j_list) + 1
+    num_agent = 4
     num_adv = num_player - num_agent
 
     player_pos_idx = np.array(range(num_agent*2))
@@ -280,8 +281,10 @@ def imagine_agent_j_obs(batch, j_list, radius):
             obs_j_list.append(obs_i)
         else:
             obs_j = -np.ones(obs_i.shape)
-
-            j_pos = all_player_pos[:, j_id, :]
+            if j_id < num_agent:
+                j_pos = all_player_pos[:, j_id, :]
+            else:
+                j_pos = all_adv_pos[:, j_id-num_agent, :]
             
             j_i_diff = j_pos - i_pos 
             # print(all_player_pos)
@@ -326,45 +329,68 @@ def add_intrinsic_reward(policy, batch: SampleBatch, other_agent_batches):
     intr_rew = np.zeros(batch[SampleBatch.REWARDS].shape)
     world_model = policy.world_model
     inputs = obs_i
-    # true_next_obs_i = to_torch(batch[SampleBatch.NEXT_OBS])
+    if policy.align_mode == 'self':
+        true_next_obs_i = to_torch(batch[SampleBatch.NEXT_OBS])
 
-    # get self prediction loss  
-    # pred_next_obs_i, _ = world_model(to_torch(batch))
+        inputs = np.concatenate((obs_i, np.expand_dims(batch[SampleBatch.ACTIONS], axis=-1)), axis=1) #(bs, obs_dim+1)
+        inputs = to_torch(inputs, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
+        input_dict = {}
+        input_dict[SampleBatch.OBS] = inputs
+        # get self prediction loss  
+        pred_next_obs_i, _ = world_model(input_dict)
+        
+        pred_loss = torch.norm(true_next_obs_i - pred_next_obs_i, p=2, dim=1) #(bs, )
+        intr_rew += -pred_loss.detach().cpu().numpy()
+    else:
+        # get prediction losses from other agents
+        num_player = (obs_size - 16) // 5
+        num_agent = len(other_agent_batches) + 1 + 1 #goal keeper #0 is uncontrollable
+        if policy.align_mode == '101':
+            j_list = list(range(1, num_agent)) # first one is goal keeper (not controlled)
+        elif policy.align_mode == '110':
+            j_list = list(range(num_agent, num_player))
+        elif policy.align_mode == '111':
+            j_list = list(range(1, num_player))
+        else:
+            raise NotSupportedErr
+        
+        obs_j_list = imagine_agent_j_obs(batch, j_list, policy.env_radius)
+        
+        obs_n = np.concatenate(obs_j_list, axis=0) #(bs*j, obs_dim), where j = len(j_list)
+        act_n = np.concatenate([batch[SampleBatch.ACTIONS]] * len(j_list), axis=0) #(bs*j, )
+        inputs = np.concatenate((obs_n, np.expand_dims(act_n, axis=-1)), axis=1) #(bs*j, obs_dim+1)
+        inputs = to_torch(inputs, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
+
+        # duplicate obs_next_i j times and concatenate them as the ground truth
+        true_next_obs_n = np.concatenate([batch[SampleBatch.NEXT_OBS]] * len(j_list), axis=0) #(bs*j, obs_dim)
+        true_next_obs_n = to_torch(true_next_obs_n, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
+
+        input_dict = {}
+        input_dict[SampleBatch.OBS] = inputs # inputs is a concatenation of obs AND action
+        # input_dict[SampleBatch.ACTIONS] = act_n
+        # get the prediction losses 
+        pred_next_obs_n, _ = world_model(input_dict)
+        
+        pred_losses = torch.norm(true_next_obs_n - pred_next_obs_n, p=2, dim=1) #(bs*j, )
+        #zero out the losses for invisible agents
+        obs_mask = ~np.all(obs_n == -1, axis=1)
+        # print('obs mask:', obs_mask)
+        pred_losses *= to_torch(obs_mask, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
+
+        pred_losses = pred_losses.view(batch_size, -1) #(bs, j)
+        # print('visible agents:', np.sum(obs_mask))
+        # print('pred losses:', pred_losses)
+        visible_agents = np.sum(obs_mask)
+        multiplier = 1 / visible_agents if visible_agents != 0 else 0
+        if policy.align_mode == '101':
+            intr_rew += multiplier * -pred_losses.sum(dim=1).detach().cpu().numpy()
+        elif policy.align_mode == '110':
+            intr_rew += multiplier * pred_losses.sum(dim=1).detach().cpu().numpy()
+        elif policy.align_mode == '111':
+            intr_rew += multiplier * (pred_losses[:, num_agent:num_player].sum(dim=1) - pred_losses[:, 1:num_agent].sum(dim=1)).detach().cpu().numpy()
+        else:
+            raise NotSupportedErr
     
-    # pred_loss = torch.norm(true_next_obs_i - pred_next_obs_i, p=2, dim=1) #(bs, )
-    # intr_rew += 1 / obs_size * -pred_loss.detach().cpu().numpy()
-
-    # get prediction losses from other agents
-    num_agent = len(other_agent_batches) + 1 + 1 #goal keeper #0 is uncontrollable
-    obs_j_list = imagine_agent_j_obs(batch, list(range(1, num_agent)), policy.env_radius)
-    
-    obs_n = np.concatenate(obs_j_list, axis=0) #(bs*j, obs_dim), where j = len(j_list)
-    act_n = np.concatenate([batch[SampleBatch.ACTIONS]] * (len(other_agent_batches) + 1), axis=0) #(bs*j, )
-    inputs = np.concatenate((obs_n, np.expand_dims(act_n, axis=-1)), axis=1) #(bs*j, obs_dim+1)
-    inputs = to_torch(inputs, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
-
-    # duplicate obs_next_i j times and concatenate them as the ground truth
-    true_next_obs_n = np.concatenate([batch[SampleBatch.NEXT_OBS]] * (len(other_agent_batches)+1), axis=0) #(bs*j, obs_dim)
-    true_next_obs_n = to_torch(true_next_obs_n, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
-
-    input_dict = {}
-    input_dict[SampleBatch.OBS] = inputs # inputs is a concatenation of obs AND action
-    # input_dict[SampleBatch.ACTIONS] = act_n
-    # get the prediction losses 
-    pred_next_obs_n, _ = world_model(input_dict)
-    
-    pred_losses = torch.norm(true_next_obs_n - pred_next_obs_n, p=2, dim=1) #(bs*j, )
-    #zero out the losses for invisible agents
-    obs_mask = ~np.all(obs_n == -1, axis=1)
-    # print('obs mask:', obs_mask)
-    pred_losses *= to_torch(obs_mask, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
-
-    pred_losses = pred_losses.view(batch_size, -1) #(bs, j)
-    # print('visible agents:', np.sum(obs_mask))
-    # print('pred losses:', pred_losses)
-    visible_agents = np.sum(obs_mask)
-    multiplier = 1 / visible_agents if visible_agents != 0 else 0
-    intr_rew += multiplier * -pred_losses.sum(dim=1).detach().cpu().numpy()
     # print('intr rew before norm:', intr_rew)
     intr_rew = 1 / obs_size * intr_rew
     # print('intr rew after norm:', intr_rew)
