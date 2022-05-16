@@ -59,7 +59,9 @@ parser.add_argument('--object-store-memory-GB', type=int, default=10)
 parser.add_argument('--memory-GB',type=int, default=10)
 parser.add_argument('--logdir', type=str, default='/vision2/u/zixianma/football_results')
 parser.add_argument('--name', type=str, default='exp')
+parser.add_argument('--checkpoint', type=str, default=None)
 parser.add_argument('--simple', action='store_true')
+parser.add_argument('--resume', action='store_true')
 parser.add_argument('--align-mode', type=str, default='101')
 parser.add_argument('--radius', type=float, default=float('inf'))
 parser.add_argument('--seeds', type=int, nargs='+', help='a list of random seeds', required=True)
@@ -310,7 +312,9 @@ if __name__ == '__main__':
       checkpoint_freq=500,
       config=config,
       local_dir=args.logdir,
-      name=args.name,
+      name=args.name if not args.checkpoint else args.checkpoint,
       checkpoint_at_end=True,
+      resume=args.resume,
+      restore=args.checkpoint
       #restore="/home/visualgenome/zixianma/football/gfootball/result/align/SAC_gfootball_2e8a9_00000_0_seed=1_2022-04-09_15-05-35/checkpoint_007150"
   )
