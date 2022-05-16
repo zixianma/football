@@ -329,8 +329,8 @@ def add_intrinsic_reward(policy, batch: SampleBatch, other_agent_batches):
     intr_rew = np.zeros(batch[SampleBatch.REWARDS].shape)
     world_model = policy.world_model
     inputs = obs_i
-    if policy.align_mode == 'self':
-        true_next_obs_i = to_torch(batch[SampleBatch.NEXT_OBS])
+    if policy.align_mode == 'self' or policy.align_mode == 'curio_self':
+        true_next_obs_i = to_torch(batch[SampleBatch.NEXT_OBS], device='cuda' if torch.cuda.is_available() else 'cpu')
 
         inputs = np.concatenate((obs_i, np.expand_dims(batch[SampleBatch.ACTIONS], axis=-1)), axis=1) #(bs, obs_dim+1)
         inputs = to_torch(inputs, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
@@ -340,12 +340,18 @@ def add_intrinsic_reward(policy, batch: SampleBatch, other_agent_batches):
         pred_next_obs_i, _ = world_model(input_dict)
         
         pred_loss = torch.norm(true_next_obs_i - pred_next_obs_i, p=2, dim=1) #(bs, )
-        intr_rew += -pred_loss.detach().cpu().numpy()
+        if policy.align_mode == 'self':
+            intr_rew += -pred_loss.detach().cpu().numpy()
+        elif policy.align_mode == 'curio_self':
+            intr_rew += pred_loss.detach().cpu().numpy()
+        else:
+            raise NotSupportedErr
+        
     else:
         # get prediction losses from other agents
         num_player = (obs_size - 16) // 5
         num_agent = len(other_agent_batches) + 1 + 1 #goal keeper #0 is uncontrollable
-        if policy.align_mode == '101':
+        if policy.align_mode == '101' or policy.align_mode == 'curio_team':
             j_list = list(range(1, num_agent)) # first one is goal keeper (not controlled)
         elif policy.align_mode == '110':
             j_list = list(range(num_agent, num_player))
@@ -384,7 +390,7 @@ def add_intrinsic_reward(policy, batch: SampleBatch, other_agent_batches):
         multiplier = 1 / visible_agents if visible_agents != 0 else 0
         if policy.align_mode == '101':
             intr_rew += multiplier * -pred_losses.sum(dim=1).detach().cpu().numpy()
-        elif policy.align_mode == '110':
+        elif policy.align_mode == '110' or policy.align_mode == 'curio_team':
             intr_rew += multiplier * pred_losses.sum(dim=1).detach().cpu().numpy()
         elif policy.align_mode == '111':
             intr_rew += multiplier * (pred_losses[:, num_agent:num_player].sum(dim=1) - pred_losses[:, 1:num_agent].sum(dim=1)).detach().cpu().numpy()
@@ -566,10 +572,14 @@ def actor_critic_loss(
         actor_loss = torch.mean(alpha.detach() * log_pis_t - q_t_det_policy)
 
     wm_batch = train_batch.copy()
-    inputs = np.concatenate((train_batch[SampleBatch.OBS], np.expand_dims(train_batch[SampleBatch.ACTIONS], axis=-1)), axis=1) #(bs*j, obs_dim+1)
+    if torch.cuda.is_available():
+        inputs = torch.cat((train_batch[SampleBatch.OBS], torch.unsqueeze(train_batch[SampleBatch.ACTIONS], -1)), 1)
+    else:
+        inputs = np.concatenate((train_batch[SampleBatch.OBS], np.expand_dims(train_batch[SampleBatch.ACTIONS], axis=-1)), axis=1) #(bs*j, obs_dim+1)
     inputs = to_torch(inputs, device='cuda' if torch.cuda.is_available() else 'cpu', dtype=torch.float)
     wm_batch[SampleBatch.OBS] = inputs
-    new_obs_pred, _ = policy.world_model(wm_batch)
+    world_model = policy.world_model.to('cuda' if torch.cuda.is_available() else 'cpu')
+    new_obs_pred, _ = world_model(wm_batch)
     wm_loss = F.mse_loss(
         new_obs_pred, train_batch[SampleBatch.NEXT_OBS])
     # Store values for stats function in model (tower), such that for
